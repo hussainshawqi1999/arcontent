@@ -16,38 +16,6 @@ if (!IPTV_CONFIG.host.startsWith('http')) IPTV_CONFIG.host = 'http://' + IPTV_CO
 
 const FILTER_PREFIX = "|AR|"; 
 
-let CACHED_CATS = {
-    movie: [],
-    series: [],
-    lastUpdated: 0
-};
-
-async function updateCategories() {
-    const now = Date.now();
-    if (now - CACHED_CATS.lastUpdated < 3600000 && CACHED_CATS.movie.length > 0) return;
-
-    try {
-        const [vodRes, serRes] = await Promise.all([
-            axios.get(`${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=get_vod_categories`, { timeout: 5000 }).catch(e => ({ data: [] })),
-            axios.get(`${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=get_series_categories`, { timeout: 5000 }).catch(e => ({ data: [] }))
-        ]);
-
-        if (Array.isArray(vodRes.data)) {
-            CACHED_CATS.movie = vodRes.data
-                .filter(c => c.category_name.trim().toUpperCase().startsWith(FILTER_PREFIX))
-                .map(c => c.category_id);
-        }
-
-        if (Array.isArray(serRes.data)) {
-            CACHED_CATS.series = serRes.data
-                .filter(c => c.category_name.trim().toUpperCase().startsWith(FILTER_PREFIX))
-                .map(c => c.category_id);
-        }
-
-        CACHED_CATS.lastUpdated = now;
-    } catch (e) { console.error("Cache Update Failed"); }
-}
-
 function sortItems(items) {
     if (!Array.isArray(items)) return [];
     return items.sort((a, b) => {
@@ -92,11 +60,32 @@ app.get('/', (req, res) => {
 });
 
 app.get('/manifest.json', async (req, res) => {
-    await updateCategories();
+    let movieGenres = ["All"];
+    let seriesGenres = ["All"];
+
+    try {
+        const [vodRes, serRes] = await Promise.all([
+            axios.get(`${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=get_vod_categories`, { timeout: 4000 }).catch(e => ({ data: [] })),
+            axios.get(`${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=get_series_categories`, { timeout: 4000 }).catch(e => ({ data: [] }))
+        ]);
+
+        if (Array.isArray(vodRes.data)) {
+            movieGenres = vodRes.data
+                .filter(c => c.category_name.trim().toUpperCase().startsWith(FILTER_PREFIX))
+                .map(c => c.category_name);
+        }
+        
+        if (Array.isArray(serRes.data)) {
+            seriesGenres = serRes.data
+                .filter(c => c.category_name.trim().toUpperCase().startsWith(FILTER_PREFIX))
+                .map(c => c.category_name);
+        }
+
+    } catch (e) { }
 
     const manifest = {
-        id: "org.arabic.iptv.hussain.fast",
-        version: "4.1.0",
+        id: "org.arabic.iptv.hussain.smart",
+        version: "6.0.0",
         name: "Arabic Content - By Hussain",
         description: "Arabic Movies and Series",
         resources: ["catalog", "meta", "stream"],
@@ -106,13 +95,13 @@ app.get('/manifest.json', async (req, res) => {
                 type: "movie", 
                 id: "iptv-arabic-movies", 
                 name: "Arabic Movies", 
-                extra: [{ name: "search" }, { name: "skip" }] 
+                extra: [{ name: "genre", options: movieGenres }, { name: "search" }, { name: "skip" }] 
             },
             { 
                 type: "series", 
                 id: "iptv-arabic-series", 
                 name: "Arabic Series", 
-                extra: [{ name: "search" }, { name: "skip" }] 
+                extra: [{ name: "genre", options: seriesGenres }, { name: "search" }, { name: "skip" }] 
             }
         ],
         idPrefixes: ["xtream:"]
@@ -122,51 +111,64 @@ app.get('/manifest.json', async (req, res) => {
     res.json(manifest);
 });
 
-app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
+async function handleCatalog(req, res) {
     const { type, extra } = req.params;
-    let extraObj = {};
     
+    let extraObj = {};
     if (extra) {
         try {
             const params = new URLSearchParams(extra);
+            extraObj.genre = params.get('genre');
             extraObj.search = params.get('search');
             extraObj.skip = parseInt(params.get('skip')) || 0;
         } catch(e) { extraObj.search = extra; }
     }
 
-    await updateCategories();
-
     let action = '';
-    let allowedIds = type === 'movie' ? CACHED_CATS.movie : CACHED_CATS.series;
+    let catAction = '';
 
-    if (type === 'movie') { action = 'get_vod_streams'; }
-    else if (type === 'series') { action = 'get_series'; }
+    if (type === 'movie') { action = 'get_vod_streams'; catAction = 'get_vod_categories'; }
+    else if (type === 'series') { action = 'get_series'; catAction = 'get_series_categories'; }
     else { return res.json({ metas: [] }); }
 
     try {
-        let metas = [];
+        const catRes = await axios.get(`${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=${catAction}`, { timeout: 5000 });
+        let allowedCategoryIds = [];
+        let categoryId = null;
 
-        if (extraObj.search) {
-            const searchUrl = `${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=${action}&search=${encodeURIComponent(extraObj.search)}`;
-            const resp = await axios.get(searchUrl, { timeout: 8000 });
-            
-            if (Array.isArray(resp.data)) {
-                metas = resp.data.filter(item => allowedIds.includes(item.category_id));
-            }
-        } 
-        else {
-            const apiUrl = `${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=${action}`;
-            const resp = await axios.get(apiUrl, { timeout: 10000 });
-            if (Array.isArray(resp.data)) {
-                metas = resp.data.filter(item => allowedIds.includes(item.category_id));
+        if (Array.isArray(catRes.data)) {
+            allowedCategoryIds = catRes.data
+                .filter(c => c.category_name.trim().toUpperCase().startsWith(FILTER_PREFIX))
+                .map(c => c.category_id);
+
+            if (extraObj.genre) {
+                const targetCat = catRes.data.find(c => c.category_name === extraObj.genre);
+                if (targetCat) categoryId = targetCat.category_id;
             }
         }
 
-        metas = sortItems(metas);
+        let apiUrl = `${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=${action}`;
 
+        if (extraObj.search) {
+            apiUrl += `&search=${encodeURIComponent(extraObj.search)}`;
+        } 
+        else if (categoryId) {
+            apiUrl += `&category_id=${categoryId}`;
+        }
+
+        const resp = await axios.get(apiUrl, { timeout: 10000 });
+        let items = Array.isArray(resp.data) ? resp.data : [];
+
+        if (allowedCategoryIds.length > 0) {
+            items = items.filter(item => allowedCategoryIds.includes(item.category_id));
+        }
+
+        items = sortItems(items);
         const skip = extraObj.skip || 0;
         const limit = 100;
-        const finalMetas = metas.slice(skip, skip + limit).map(item => ({
+        const pagedItems = items.slice(skip, skip + limit);
+
+        const metas = pagedItems.map(item => ({
             id: type === 'series' ? `xtream:series:${item.series_id}` 
                 : `xtream:movie:${item.stream_id}:${item.container_extension}`,
             type: type,
@@ -177,20 +179,25 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
         }));
 
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Cache-Control', 'max-age=300'); 
-        res.json({ metas: finalMetas });
+        res.setHeader('Cache-Control', 'max-age=60'); 
+        res.json({ metas });
 
     } catch (e) {
-        console.error("Catalog Error:", e.message);
+        res.setHeader('Access-Control-Allow-Origin', '*');
         res.json({ metas: [] });
     }
-});
+}
+
+app.get('/catalog/:type/:id.json', handleCatalog);
+app.get('/catalog/:type/:id/:extra.json', handleCatalog);
 
 app.get('/meta/:type/:id.json', async (req, res) => {
     const { type, id } = req.params;
-    
+    const parts = id.split(':');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
     if (type === 'series' && id.startsWith('xtream:series:')) {
-        const seriesId = id.split(':')[2];
+        const seriesId = parts[2];
         try {
             const url = `${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=get_series_info&series_id=${seriesId}`;
             const { data } = await axios.get(url, { timeout: 8000 });
@@ -211,7 +218,6 @@ app.get('/meta/:type/:id.json', async (req, res) => {
             }
             videos.sort((a, b) => (a.season - b.season) || (a.episode - b.episode));
 
-            res.setHeader('Access-Control-Allow-Origin', '*');
             return res.json({ meta: {
                 id: id,
                 type: 'series',
@@ -222,10 +228,9 @@ app.get('/meta/:type/:id.json', async (req, res) => {
                 videos: videos
             }});
 
-        } catch (e) { }
+        } catch (e) { return res.json({ meta: { id, type, name: "Error Info" } }); }
     }
     
-    res.setHeader('Access-Control-Allow-Origin', '*');
     res.json({ meta: { id, type, name: "Watch Stream" } });
 });
 
