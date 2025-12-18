@@ -42,28 +42,19 @@ app.get('/', (req, res) => {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Arabic IPTV - By Hussain</title>
+        <title>Arabic Content - By Hussain</title>
         <style>
             body { background-color: #0b0b0b; color: white; font-family: sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-            .container { background: #1a1a1a; padding: 40px; border-radius: 12px; text-align: center; border: 1px solid #333; box-shadow: 0 10px 40px rgba(0,0,0,0.6); max-width: 450px; width: 90%; }
-            h1 { margin-bottom: 10px; color: #a37dfc; font-size: 28px; }
-            p { color: #888; margin-bottom: 30px; line-height: 1.5; }
-            .status-box { background: #252525; padding: 15px; border-radius: 8px; margin-bottom: 25px; border: 1px dashed #444; }
-            .btn { display: block; width: 100%; padding: 16px; margin: 10px 0; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 18px; transition: 0.2s; background: #6a0dad; color: white; border: none; cursor: pointer; box-sizing: border-box; }
-            .btn:hover { background: #7b1fa2; transform: scale(1.02); }
-            .footer { margin-top: 20px; font-size: 12px; color: #555; }
+            .container { background: #1a1a1a; padding: 40px; border-radius: 12px; text-align: center; border: 1px solid #333; max-width: 450px; width: 90%; }
+            h1 { color: #a37dfc; margin-bottom: 20px; }
+            .btn { display: block; width: 100%; padding: 16px; margin: 10px 0; border-radius: 8px; text-decoration: none; font-weight: bold; background: #6a0dad; color: white; }
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>Arabic IPTV</h1>
-            <p>بوابتك للمحتوى العربي المفلتر</p>
-            <div class="status-box">
-                <small style="color: #4caf50;">● System Active</small><br>
-                <small>Filtering 12,000+ Series by ${AR_PREFIX}</small>
-            </div>
+            <h1>Arabic content</h1>
+            <p>test</p>
             <a href="${stremioUrl}" class="btn">🚀 Install on Stremio</a>
-            <div class="footer">Version 25.0.0 | Developed by Hussain</div>
         </div>
     </body>
     </html>
@@ -74,10 +65,10 @@ app.get('/manifest.json', async (req, res) => {
     await syncArabicCats();
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json({
-        id: "org.arabic.hussain.ultimate.v25",
-        version: "25.0.0",
+        id: "org.arabic.hussain.v27",
+        version: "27.0.0",
         name: "Arabic Content - By Hussain",
-        description: "Strict Arabic Filtered IPTV (Search & Genres Fixed)",
+        description: "Filtered Arabic Content (12k Library Optimized)",
         resources: ["catalog", "meta", "stream"],
         types: ["movie", "series"],
         catalogs: [
@@ -95,10 +86,13 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
     let searchTerm = "";
     let genreName = "";
     if (extra) {
-        const searchMatch = extra.match(/search=([^&]+)/);
-        const genreMatch = extra.match(/genre=([^&]+)/);
-        searchTerm = searchMatch ? decodeURIComponent(searchMatch[1]).replace('.json', '') : "";
-        genreName = genreMatch ? decodeURIComponent(genreMatch[1]).replace('.json', '') : "";
+        const cleanExtra = extra.replace('.json', '');
+        const searchMatch = cleanExtra.match(/search=([^&]+)/);
+        const genreMatch = cleanExtra.match(/genre=([^&]+)/);
+        
+        if (searchMatch) searchTerm = decodeURIComponent(searchMatch[1].replace(/\+/g, ' '));
+        else if (genreMatch) genreName = decodeURIComponent(genreMatch[1].replace(/\+/g, ' '));
+        else if (!cleanExtra.includes('=')) searchTerm = decodeURIComponent(cleanExtra.replace(/\+/g, ' '));
     }
 
     const action = type === 'movie' ? 'get_vod_streams' : 'get_series';
@@ -107,51 +101,57 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
 
     try {
         let apiUrl = `${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=${action}`;
-        if (searchTerm) apiUrl += `&search=${encodeURIComponent(searchTerm)}`;
+        
+        // 1. إذا كان طلباً للبحث، نتجاهل أي تصنيف افتراضي
+        if (searchTerm) {
+            apiUrl += `&search=${encodeURIComponent(searchTerm)}`;
+        } 
+        // 2. إذا كان اختيار تصنيف معين
         else if (genreName) {
             const target = cachedList.find(c => c.name === genreName);
             if (target) apiUrl += `&category_id=${target.id}`;
-        } else if (allowedIds.length > 0) apiUrl += `&category_id=${allowedIds[0]}`;
+        } 
+        // 3. الافتراضي عند فتح Discover (أول قسم عربي)
+        else {
+            if (allowedIds.length > 0) apiUrl += `&category_id=${allowedIds[0]}`;
+        }
 
-        const resp = await axios.get(apiUrl, { timeout: 8000 });
+        const resp = await axios.get(apiUrl, { timeout: 10000 });
         let items = Array.isArray(resp.data) ? resp.data : [];
 
-        if (allowedIds.length > 0 && !searchTerm) {
+        // 4. الفلترة الصارمة (لضمان بقاء المحتوى عربياً فقط)
+        if (allowedIds.length > 0) {
             items = items.filter(i => allowedIds.includes(String(i.category_id)));
         }
 
-        if (items.length === 0) {
-            return res.json({ metas: [{ id: "error", name: "❌ No results found", type: type, posterShape: "poster" }] });
-        }
-
         const metas = items.slice(0, 100).map(i => ({
-            id: type === 'series' ? `xtream:series:${i.series_id}` : `xtream:movie:${i.stream_id}:${i.container_extension}`,
-            type: type, name: i.name, poster: i.stream_icon || i.cover, posterShape: 'poster'
+            id: type === 'series' ? `xtream:series:${i.series_id || i.stream_id}` : `xtream:movie:${i.stream_id}:${i.container_extension || 'mp4'}`,
+            type: type,
+            name: i.name,
+            poster: i.stream_icon || i.cover,
+            posterShape: 'poster'
         }));
 
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.json({ metas });
     } catch (e) {
-        let errorMsg = "❌ Connection Error";
-        if (e.code === 'ECONNABORTED') errorMsg = "❌ Search Timeout";
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.json({ metas: [{ id: "error", name: errorMsg, type: type, posterShape: "poster" }] });
+        res.json({ metas: [] });
     }
 });
 
 app.get('/meta/:type/:id.json', async (req, res) => {
     const { type, id } = req.params;
-    if (id === "error") return res.json({ meta: { id, name: "Error", type } });
     const p = id.split(':');
     res.setHeader('Access-Control-Allow-Origin', '*');
     if (type === 'series') {
         try {
             const { data } = await axios.get(`${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=get_series_info&series_id=${p[2]}`, { timeout: 9000 });
             let videos = [];
-            if (data.episodes) {
+            if (data && data.episodes) {
                 Object.values(data.episodes).forEach(s => {
                     s.forEach(e => {
-                        videos.push({ id: `xtream:ep:${e.id}:${e.container_extension}`, title: e.title || `Ep ${e.episode_num}`, season: parseInt(e.season), episode: parseInt(e.episode_num) });
+                        videos.push({ id: `xtream:ep:${e.id}:${e.container_extension || 'mp4'}`, title: e.title || `Ep ${e.episode_num}`, season: parseInt(e.season), episode: parseInt(e.episode_num) });
                     });
                 });
             }
@@ -164,8 +164,8 @@ app.get('/meta/:type/:id.json', async (req, res) => {
 app.get('/stream/:type/:id.json', (req, res) => {
     const p = req.params.id.split(':');
     let u = "";
-    if (p[1] === 'movie') u = `${IPTV.host}/movie/${IPTV.user}/${IPTV.pass}/${p[2]}.${p[3]}`;
-    else if (p[1] === 'ep') u = `${IPTV.host}/series/${IPTV.user}/${IPTV.pass}/${p[2]}.${p[3]}`;
+    if (p[1] === 'movie') u = `${IPTV.host}/movie/${IPTV.user}/${IPTV.pass}/${p[2]}.${p[3] || 'mp4'}`;
+    else if (p[1] === 'ep') u = `${IPTV.host}/series/${IPTV.user}/${IPTV.pass}/${p[2]}.${p[3] || 'mp4'}`;
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json({ streams: [{ title: "⚡ Watch Now", url: u }] });
 });
