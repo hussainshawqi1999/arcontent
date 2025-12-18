@@ -44,17 +44,17 @@ app.get('/', (req, res) => {
     const host = req.get('host');
     const manifestUrl = `${protocol}://${host}/manifest.json`;
     const stremioUrl = manifestUrl.replace(/^https?/, 'stremio');
-    res.send(`<div style="background:#0b0b0b;color:#fff;height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;font-family:sans-serif;text-align:center;"><h2>Arabic Content - By Hussain</h2><p style="color:#888">Search Fixed: Full Library Search Enabled</p><a href="${stremioUrl}" style="padding:15px 35px;background:#6a0dad;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">🚀 Install to Stremio</a></div>`);
+    res.send(`<div style="background:#0b0b0b;color:#fff;height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;font-family:sans-serif;text-align:center;"><h2>Arabic Content - By Hussain</h2><p style="color:#888">Final Search Fix (v14)</p><a href="${stremioUrl}" style="padding:15px 35px;background:#6a0dad;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">🚀 Install to Stremio</a></div>`);
 });
 
 app.get('/manifest.json', async (req, res) => {
     await syncCats();
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json({
-        id: "org.arabic.hussain.searchfix.v13",
-        version: "13.0.0",
+        id: "org.arabic.hussain.finalfix.v14",
+        version: "14.0.0",
         name: "Arabic Content - By Hussain",
-        description: "Full Arabic Search - Series & Movies",
+        description: "Full Library Search Enabled (Arabic Only)",
         resources: ["catalog", "meta", "stream"],
         types: ["movie", "series"],
         catalogs: [
@@ -68,52 +68,51 @@ app.get('/manifest.json', async (req, res) => {
 app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
     const { type, extra } = req.params;
     await syncCats();
-    let search = null;
-    let genre = null;
-    let skip = 0;
+    
+    let searchTerm = null;
+    let genreName = null;
+    let skipCount = 0;
 
     if (extra) {
-        const decoded = decodeURIComponent(extra);
-        if (decoded.includes('search=')) search = decoded.split('search=')[1].split('&')[0];
-        if (decoded.includes('genre=')) genre = decoded.split('genre=')[1].split('&')[0];
-        if (decoded.includes('skip=')) skip = parseInt(decoded.split('skip=')[1].split('&')[0]) || 0;
+        const pairs = extra.split('&');
+        pairs.forEach(p => {
+            const [k, v] = p.split('=');
+            if (k === 'search') searchTerm = decodeURIComponent(v);
+            if (k === 'genre') genreName = decodeURIComponent(v);
+            if (k === 'skip') skipCount = parseInt(v) || 0;
+        });
     }
 
     const action = type === 'movie' ? 'get_vod_streams' : 'get_series';
     const allowedIds = type === 'movie' ? CAT_CACHE.movieIds : CAT_CACHE.seriesIds;
 
     try {
-        let url = `${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=${action}`;
+        let apiUrl = `${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=${action}`;
         
-        if (search) {
-            url += `&search=${encodeURIComponent(search)}`;
-            const resp = await axios.get(url, { timeout: 10000 });
-            let items = Array.isArray(resp.data) ? resp.data : [];
-            items = items.filter(i => allowedIds.has(String(i.category_id)));
-            const metas = items.slice(skip, skip + 100).map(i => ({
-                id: type === 'series' ? `xtream:series:${i.series_id}` : `xtream:movie:${i.stream_id}:${i.container_extension}`,
-                type: type, name: i.name, poster: i.stream_icon || i.cover, posterShape: 'poster'
-            }));
-            res.setHeader('Access-Control-Allow-Origin', '*');
-            return res.json({ metas });
-        }
-
-        if (genre) {
+        if (searchTerm) {
+            apiUrl += `&search=${encodeURIComponent(searchTerm)}`;
+        } else if (genreName) {
             const catAction = type === 'movie' ? 'get_vod_categories' : 'get_series_categories';
             const catRes = await axios.get(`${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=${catAction}`, { timeout: 4000 });
-            const c = catRes.data.find(cat => cat.category_name === genre);
-            if (c) url += `&category_id=${c.category_id}`;
+            const c = catRes.data.find(cat => cat.category_name === genreName);
+            if (c) apiUrl += `&category_id=${c.category_id}`;
         } else {
             const firstId = Array.from(allowedIds)[0];
-            if (firstId) url += `&category_id=${firstId}`;
+            if (firstId) apiUrl += `&category_id=${firstId}`;
         }
 
-        const resp = await axios.get(url, { timeout: 10000 });
+        const resp = await axios.get(apiUrl, { timeout: 10000 });
         let items = Array.isArray(resp.data) ? resp.data : [];
-        const metas = items.slice(skip, skip + 100).map(i => ({
+
+        if (searchTerm || !genreName) {
+            items = items.filter(i => allowedIds.has(String(i.category_id)));
+        }
+
+        const metas = items.slice(skipCount, skipCount + 100).map(i => ({
             id: type === 'series' ? `xtream:series:${i.series_id}` : `xtream:movie:${i.stream_id}:${i.container_extension}`,
             type: type, name: i.name, poster: i.stream_icon || i.cover, posterShape: 'poster'
         }));
+
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.json({ metas });
     } catch (e) {
