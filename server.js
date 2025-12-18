@@ -37,7 +37,7 @@ app.get('/', (req, res) => {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Arabic Player</title>
+        <title>Arabic Content - By Hussain</title>
         <style>
             body { background-color: #0b0b0b; color: white; font-family: sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
             .container { background: #1a1a1a; padding: 40px; border-radius: 12px; text-align: center; border: 1px solid #333; box-shadow: 0 10px 40px rgba(0,0,0,0.6); max-width: 400px; width: 90%; }
@@ -50,8 +50,8 @@ app.get('/', (req, res) => {
     </head>
     <body>
         <div class="container">
-            <h1>Arabic Content Player</h1>
-            <p>أفلام ومسلسلات عربية حصرية (|AR|)</p>
+            <h1>Arabic Content - By Hussain</h1>
+            <p>Arabic Movies and Series</p>
             <a href="${stremioUrl}" class="btn btn-install">🚀 Install Addon</a>
         </div>
     </body>
@@ -84,10 +84,10 @@ app.get('/manifest.json', async (req, res) => {
     } catch (e) { console.error("Manifest Error:", e.message); }
 
     const manifest = {
-        id: "org.arabic.iptv.private",
-        version: "3.2.0",
-        name: "Arabic Content Player",
-        description: "Private Arabic Movies & Series",
+        id: "org.arabic.iptv.hussain",
+        version: "3.4.0",
+        name: "Arabic Content - By Hussain",
+        description: "Arabic Movies and Series",
         resources: ["catalog", "meta", "stream"],
         types: ["movie", "series"],
         catalogs: [
@@ -133,24 +133,27 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
 
     try {
         let metas = [];
-        let allowedCategoryIds = [];
-
-        const catRes = await axios.get(`${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=${catAction}`, { timeout: 5000 });
-        if (Array.isArray(catRes.data)) {
-            const filteredCats = catRes.data.filter(c => c.category_name.trim().toUpperCase().startsWith(FILTER_PREFIX));
-            allowedCategoryIds = filteredCats.map(c => c.category_id);
-        }
 
         if (extraObj.search) {
             const searchUrl = `${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=${action}&search=${encodeURIComponent(extraObj.search)}`;
             const resp = await axios.get(searchUrl, { timeout: 10000 });
+            
             if (Array.isArray(resp.data)) {
-                metas = resp.data.filter(item => allowedCategoryIds.includes(item.category_id));
+                metas = resp.data;
+                const searchTerm = extraObj.search.toLowerCase();
+                metas = metas.filter(item => (item.name && item.name.toLowerCase().includes(searchTerm)));
             }
         } 
         else {
-            let categoryId = null;
+            const catRes = await axios.get(`${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=${catAction}`, { timeout: 5000 });
+            let allowedCategoryIds = [];
             
+            if (Array.isArray(catRes.data)) {
+                const filteredCats = catRes.data.filter(c => c.category_name.trim().toUpperCase().startsWith(FILTER_PREFIX));
+                allowedCategoryIds = filteredCats.map(c => c.category_id);
+            }
+
+            let categoryId = null;
             if (extraObj.genre && extraObj.genre !== "All") {
                  if (extraObj.genre.toUpperCase().startsWith(FILTER_PREFIX)) {
                      const catObj = catRes.data.find(c => c.category_name === extraObj.genre);
