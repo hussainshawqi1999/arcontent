@@ -12,50 +12,38 @@ const IPTV = {
 };
 
 if (IPTV.host.endsWith('/')) IPTV.host = IPTV.host.slice(0, -1);
-if (!IPTV.host.startsWith('http')) IPTV.host = 'http://' + IPTV.host;
-
 const AR_PREFIX = "|AR|";
-let CAT_CACHE = { movieCats: [], seriesCats: [], lastUpdated: 0 };
 
-async function syncCats() {
+// كاش بسيط للفئات لتقليل الضغط
+let CACHED_AR_IDS = { movie: [], series: [], lastUpdated: 0 };
+
+async function getArabicIds() {
     const now = Date.now();
-    if (now - CAT_CACHE.lastUpdated < 3600000 && CAT_CACHE.movieCats.length > 0) return;
+    if (now - CACHED_AR_IDS.lastUpdated < 3600000 && CACHED_AR_IDS.movie.length > 0) return;
     try {
         const [v, s] = await Promise.all([
-            axios.get(`${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=get_vod_categories`, { timeout: 5000 }).catch(() => ({ data: [] })),
-            axios.get(`${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=get_series_categories`, { timeout: 5000 }).catch(() => ({ data: [] }))
+            axios.get(`${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=get_vod_categories`, { timeout: 4000 }).catch(() => ({ data: [] })),
+            axios.get(`${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=get_series_categories`, { timeout: 4000 }).catch(() => ({ data: [] }))
         ]);
-        if (Array.isArray(v.data)) {
-            CAT_CACHE.movieCats = v.data.filter(c => c.category_name.toUpperCase().includes(AR_PREFIX));
-        }
-        if (Array.isArray(s.data)) {
-            CAT_CACHE.seriesCats = s.data.filter(c => c.category_name.toUpperCase().includes(AR_PREFIX));
-        }
-        CAT_CACHE.lastUpdated = now;
+        CACHED_AR_IDS.movie = v.data.filter(c => c.category_name.includes(AR_PREFIX)).map(c => String(c.category_id));
+        CACHED_AR_IDS.series = s.data.filter(c => c.category_name.includes(AR_PREFIX)).map(c => String(c.category_id));
+        CACHED_AR_IDS.lastUpdated = now;
     } catch (e) {}
 }
 
-app.get('/', (req, res) => {
-    const protocol = req.protocol;
-    const host = req.get('host');
-    const manifestUrl = `${protocol}://${host}/manifest.json`;
-    const stremioUrl = manifestUrl.replace(/^https?/, 'stremio');
-    res.send(`<div style="background:#0b0b0b;color:#fff;height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;font-family:sans-serif;text-align:center;"><h2>Arabic Content - By Hussain</h2><p style="color:#888">Search Fix: Logic v20</p><a href="${stremioUrl}" style="padding:15px 35px;background:#6a0dad;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">🚀 Install to Stremio</a></div>`);
-});
-
 app.get('/manifest.json', async (req, res) => {
-    await syncCats();
+    await getArabicIds();
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json({
-        id: "org.arabic.hussain.fix.v20",
-        version: "20.0.0",
+        id: "org.arabic.hussain.v21",
+        version: "21.0.0",
         name: "Arabic Content - By Hussain",
-        description: "Arabic IPTV - Movies & Series",
+        description: "IPTV Arabic Only - Search Fixed",
         resources: ["catalog", "meta", "stream"],
         types: ["movie", "series"],
         catalogs: [
-            { type: "movie", id: "ar-movies", name: "Arabic Movies", extra: [{ name: "genre", options: CAT_CACHE.movieCats.map(c => c.category_name) }, { name: "search" }, { name: "skip" }] },
-            { type: "series", id: "ar-series", name: "Arabic Series", extra: [{ name: "genre", options: CAT_CACHE.seriesCats.map(c => c.category_name) }, { name: "search" }, { name: "skip" }] }
+            { type: "movie", id: "ar-movies", name: "Arabic Movies", extra: [{ name: "search" }, { name: "skip" }] },
+            { type: "series", id: "ar-series", name: "Arabic Series", extra: [{ name: "search" }, { name: "skip" }] }
         ],
         idPrefixes: ["xtream:"]
     });
@@ -63,65 +51,47 @@ app.get('/manifest.json', async (req, res) => {
 
 app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
     const { type, extra } = req.params;
-    await syncCats();
-    
-    let searchTerm = null;
-    let genreName = null;
-    let skipCount = 0;
+    await getArabicIds();
 
+    let searchTerm = "";
     if (extra) {
-        const cleanExtra = extra.replace('.json', '');
-        if (cleanExtra.includes('search=')) {
-            searchTerm = decodeURIComponent(cleanExtra.split('search=')[1].split('&')[0]);
-        } else if (cleanExtra.includes('genre=')) {
-            genreName = decodeURIComponent(cleanExtra.split('genre=')[1].split('&')[0]);
-        } else if (cleanExtra.includes('skip=')) {
-            skipCount = parseInt(cleanExtra.split('skip=')[1].split('&')[0]) || 0;
-        } else {
-            searchTerm = decodeURIComponent(cleanExtra);
-        }
+        // استخراج كلمة البحث بدقة وحذف .json
+        const match = extra.match(/search=([^&]+)/);
+        searchTerm = match ? decodeURIComponent(match[1]).replace('.json', '') : "";
     }
 
     const action = type === 'movie' ? 'get_vod_streams' : 'get_series';
-    const allowedCats = type === 'movie' ? CAT_CACHE.movieCats : CAT_CACHE.seriesCats;
-    const allowedIds = allowedCats.map(c => String(c.category_id));
+    const allowedIds = type === 'movie' ? CACHED_AR_IDS.movie : CACHED_AR_IDS.series;
 
     try {
-        let metas = [];
-
+        let apiUrl = `${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=${action}`;
+        
         if (searchTerm) {
-            const searchUrl = `${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=${action}&search=${encodeURIComponent(searchTerm)}`;
-            const searchRes = await axios.get(searchUrl, { timeout: 12000 });
-            if (Array.isArray(searchRes.data)) {
-                metas = searchRes.data; 
-            }
+            apiUrl += `&search=${encodeURIComponent(searchTerm)}`;
         } else {
-            let categoryId = null;
-            if (genreName) {
-                const target = allowedCats.find(c => c.category_name === genreName);
-                if (target) categoryId = target.category_id;
-            } else if (allowedIds.length > 0) {
-                categoryId = allowedIds[0];
-            }
-
-            let apiUrl = `${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=${action}`;
-            if (categoryId) apiUrl += `&category_id=${categoryId}`;
-            const response = await axios.get(apiUrl, { timeout: 12000 });
-            metas = Array.isArray(response.data) ? response.data : [];
+            // إذا لم يكن بحثاً، نجلب أول فئة عربية فقط لتجنب جلب 12 ألف عنصر
+            if (allowedIds.length > 0) apiUrl += `&category_id=${allowedIds[0]}`;
         }
 
-        const finalMetas = metas.slice(skipCount, skipCount + 100).map(i => ({
+        const resp = await axios.get(apiUrl, { timeout: 9000 });
+        let items = Array.isArray(resp.data) ? resp.data : [];
+
+        // فلترة النتائج لتكون عربية فقط
+        if (allowedIds.length > 0) {
+            items = items.filter(i => allowedIds.includes(String(i.category_id)));
+        }
+
+        const metas = items.slice(0, 80).map(i => ({
             id: type === 'series' ? `xtream:series:${i.series_id}` : `xtream:movie:${i.stream_id}:${i.container_extension}`,
             type: type,
-            name: i.name || "Untitled",
-            poster: i.stream_icon || i.cover || "",
+            name: i.name,
+            poster: i.stream_icon || i.cover,
             posterShape: 'poster'
         }));
 
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.json({ metas: finalMetas });
+        res.json({ metas });
     } catch (e) {
-        res.setHeader('Access-Control-Allow-Origin', '*');
         res.json({ metas: [] });
     }
 });
@@ -132,17 +102,16 @@ app.get('/meta/:type/:id.json', async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     if (type === 'series') {
         try {
-            const { data } = await axios.get(`${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=get_series_info&series_id=${p[2]}`, { timeout: 10000 });
-            let v = [];
+            const { data } = await axios.get(`${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=get_series_info&series_id=${p[2]}`, { timeout: 9000 });
+            let videos = [];
             if (data.episodes) {
                 Object.values(data.episodes).forEach(s => {
                     s.forEach(e => {
-                        v.push({ id: `xtream:ep:${e.id}:${e.container_extension}`, title: e.title || `Ep ${e.episode_num}`, season: parseInt(e.season), episode: parseInt(e.episode_num), released: new Date().toISOString() });
+                        videos.push({ id: `xtream:ep:${e.id}:${e.container_extension}`, title: e.title || `Ep ${e.episode_num}`, season: parseInt(e.season), episode: parseInt(e.episode_num) });
                     });
                 });
             }
-            v.sort((a, b) => (a.season - b.season) || (a.episode - b.episode));
-            return res.json({ meta: { id, type: 'series', name: data.info.name, poster: data.info.cover, description: data.info.plot, videos: v }});
+            return res.json({ meta: { id, type: 'series', name: data.info.name, poster: data.info.cover, videos } });
         } catch (e) {}
     }
     res.json({ meta: { id, type, name: "Watch Now" } });
@@ -157,7 +126,6 @@ app.get('/stream/:type/:id.json', (req, res) => {
     res.json({ streams: [{ title: "⚡ Watch Now", url: u }] });
 });
 
-app.get('/catalog/:type/:id.json', (req, res) => res.redirect(`/catalog/${req.params.type}/${req.params.id}/skip=0.json`));
-
+app.get('/', (req, res) => res.send("Arabic IPTV Addon Active"));
 if (process.env.VERCEL) module.exports = app;
 else app.listen(7000);
