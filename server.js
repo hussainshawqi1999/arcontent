@@ -40,17 +40,17 @@ app.get('/', (req, res) => {
     const host = req.get('host');
     const manifestUrl = `${protocol}://${host}/manifest.json`;
     const stremioUrl = manifestUrl.replace(/^https?/, 'stremio');
-    res.send(`<div style="background:#0b0b0b;color:#fff;height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;font-family:sans-serif;text-align:center;"><h2>Arabic Content - By Hussain</h2><p style="color:#888">Logic Restored & Verified (v19)</p><a href="${stremioUrl}" style="padding:15px 35px;background:#6a0dad;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">🚀 Install to Stremio</a></div>`);
+    res.send(`<div style="background:#0b0b0b;color:#fff;height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;font-family:sans-serif;text-align:center;"><h2>Arabic Content - By Hussain</h2><p style="color:#888">Search Fix: Logic v20</p><a href="${stremioUrl}" style="padding:15px 35px;background:#6a0dad;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">🚀 Install to Stremio</a></div>`);
 });
 
 app.get('/manifest.json', async (req, res) => {
     await syncCats();
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json({
-        id: "org.arabic.hussain.restore.v19",
-        version: "19.0.0",
+        id: "org.arabic.hussain.fix.v20",
+        version: "20.0.0",
         name: "Arabic Content - By Hussain",
-        description: "Arabic Movies and Series",
+        description: "Arabic IPTV - Movies & Series",
         resources: ["catalog", "meta", "stream"],
         types: ["movie", "series"],
         catalogs: [
@@ -65,18 +65,21 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
     const { type, extra } = req.params;
     await syncCats();
     
-    let extraObj = {};
+    let searchTerm = null;
+    let genreName = null;
+    let skipCount = 0;
+
     if (extra) {
-        try {
-            if (extra.includes('=')) {
-                const params = new URLSearchParams(extra);
-                extraObj.genre = params.get('genre');
-                extraObj.search = params.get('search');
-                extraObj.skip = parseInt(params.get('skip')) || 0;
-            } else {
-                extraObj.search = extra.replace('.json', '');
-            }
-        } catch(e) {}
+        const cleanExtra = extra.replace('.json', '');
+        if (cleanExtra.includes('search=')) {
+            searchTerm = decodeURIComponent(cleanExtra.split('search=')[1].split('&')[0]);
+        } else if (cleanExtra.includes('genre=')) {
+            genreName = decodeURIComponent(cleanExtra.split('genre=')[1].split('&')[0]);
+        } else if (cleanExtra.includes('skip=')) {
+            skipCount = parseInt(cleanExtra.split('skip=')[1].split('&')[0]) || 0;
+        } else {
+            searchTerm = decodeURIComponent(cleanExtra);
+        }
     }
 
     const action = type === 'movie' ? 'get_vod_streams' : 'get_series';
@@ -86,17 +89,16 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
     try {
         let metas = [];
 
-        if (extraObj.search) {
-            const searchTerm = encodeURIComponent(extraObj.search);
-            const searchUrl = `${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=${action}&search=${searchTerm}`;
-            const searchRes = await axios.get(searchUrl, { timeout: 10000 });
+        if (searchTerm) {
+            const searchUrl = `${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=${action}&search=${encodeURIComponent(searchTerm)}`;
+            const searchRes = await axios.get(searchUrl, { timeout: 12000 });
             if (Array.isArray(searchRes.data)) {
                 metas = searchRes.data; 
             }
         } else {
             let categoryId = null;
-            if (extraObj.genre) {
-                const target = allowedCats.find(c => c.category_name === extraObj.genre);
+            if (genreName) {
+                const target = allowedCats.find(c => c.category_name === genreName);
                 if (target) categoryId = target.category_id;
             } else if (allowedIds.length > 0) {
                 categoryId = allowedIds[0];
@@ -104,15 +106,16 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
 
             let apiUrl = `${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=${action}`;
             if (categoryId) apiUrl += `&category_id=${categoryId}`;
-
-            const response = await axios.get(apiUrl, { timeout: 10000 });
+            const response = await axios.get(apiUrl, { timeout: 12000 });
             metas = Array.isArray(response.data) ? response.data : [];
         }
 
-        const skip = extraObj.skip || 0;
-        const finalMetas = metas.slice(skip, skip + 100).map(i => ({
+        const finalMetas = metas.slice(skipCount, skipCount + 100).map(i => ({
             id: type === 'series' ? `xtream:series:${i.series_id}` : `xtream:movie:${i.stream_id}:${i.container_extension}`,
-            type: type, name: i.name, poster: i.stream_icon || i.cover, posterShape: 'poster'
+            type: type,
+            name: i.name || "Untitled",
+            poster: i.stream_icon || i.cover || "",
+            posterShape: 'poster'
         }));
 
         res.setHeader('Access-Control-Allow-Origin', '*');
@@ -129,7 +132,7 @@ app.get('/meta/:type/:id.json', async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     if (type === 'series') {
         try {
-            const { data } = await axios.get(`${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=get_series_info&series_id=${p[2]}`, { timeout: 9000 });
+            const { data } = await axios.get(`${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=get_series_info&series_id=${p[2]}`, { timeout: 10000 });
             let v = [];
             if (data.episodes) {
                 Object.values(data.episodes).forEach(s => {
