@@ -30,45 +30,14 @@ async function syncArabicCats() {
     } catch (e) {}
 }
 
-app.get('/', (req, res) => {
-    const host = req.get('host');
-    const protocol = req.protocol;
-    const manifestUrl = `${protocol}://${host}/manifest.json`;
-    const stremioUrl = manifestUrl.replace(/^https?/, 'stremio');
-
-    res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Arabic Content - By Hussain</title>
-        <style>
-            body { background-color: #0b0b0b; color: white; font-family: sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-            .container { background: #1a1a1a; padding: 40px; border-radius: 12px; text-align: center; border: 1px solid #333; max-width: 450px; width: 90%; }
-            h1 { color: #a37dfc; margin-bottom: 20px; }
-            .btn { display: block; width: 100%; padding: 16px; margin: 10px 0; border-radius: 8px; text-decoration: none; font-weight: bold; background: #6a0dad; color: white; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>Arabic content</h1>
-            <p>test</p>
-            <a href="${stremioUrl}" class="btn">🚀 Install on Stremio</a>
-        </div>
-    </body>
-    </html>
-    `);
-});
-
 app.get('/manifest.json', async (req, res) => {
     await syncArabicCats();
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json({
-        id: "org.arabic.hussain.v27",
-        version: "27.0.0",
+        id: "org.arabic.hussain.v28",
+        version: "28.0.0",
         name: "Arabic Content - By Hussain",
-        description: "Filtered Arabic Content (12k Library Optimized)",
+        description: "Arabic Filtered IPTV (Search Logic Fix)",
         resources: ["catalog", "meta", "stream"],
         types: ["movie", "series"],
         catalogs: [
@@ -85,14 +54,19 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
 
     let searchTerm = "";
     let genreName = "";
+
     if (extra) {
-        const cleanExtra = extra.replace('.json', '');
-        const searchMatch = cleanExtra.match(/search=([^&]+)/);
-        const genreMatch = cleanExtra.match(/genre=([^&]+)/);
+        // تنظيف الرابط من .json والتعامل مع كافة أشكال البحث
+        const cleanExtra = decodeURIComponent(extra.replace('.json', '').replace(/\+/g, ' '));
         
-        if (searchMatch) searchTerm = decodeURIComponent(searchMatch[1].replace(/\+/g, ' '));
-        else if (genreMatch) genreName = decodeURIComponent(genreMatch[1].replace(/\+/g, ' '));
-        else if (!cleanExtra.includes('=')) searchTerm = decodeURIComponent(cleanExtra.replace(/\+/g, ' '));
+        if (cleanExtra.includes('search=')) {
+            searchTerm = cleanExtra.split('search=')[1].split('&')[0];
+        } else if (cleanExtra.includes('genre=')) {
+            genreName = cleanExtra.split('genre=')[1].split('&')[0];
+        } else {
+            // في حالة أرسل Stremio الكلمة مباشرة بدون مفتاح search=
+            searchTerm = cleanExtra;
+        }
     }
 
     const action = type === 'movie' ? 'get_vod_streams' : 'get_series';
@@ -102,24 +76,21 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
     try {
         let apiUrl = `${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=${action}`;
         
-        // 1. إذا كان طلباً للبحث، نتجاهل أي تصنيف افتراضي
-        if (searchTerm) {
-            apiUrl += `&search=${encodeURIComponent(searchTerm)}`;
-        } 
-        // 2. إذا كان اختيار تصنيف معين
-        else if (genreName) {
+        // تعديل جوهري: إذا وجد أي نص بحث، نلغي الفئة الافتراضية فوراً
+        if (searchTerm && searchTerm.trim().length > 0) {
+            apiUrl += `&search=${encodeURIComponent(searchTerm.trim())}`;
+        } else if (genreName) {
             const target = cachedList.find(c => c.name === genreName);
             if (target) apiUrl += `&category_id=${target.id}`;
-        } 
-        // 3. الافتراضي عند فتح Discover (أول قسم عربي)
-        else {
+        } else {
+            // التحميل الافتراضي عند فتح Discover
             if (allowedIds.length > 0) apiUrl += `&category_id=${allowedIds[0]}`;
         }
 
         const resp = await axios.get(apiUrl, { timeout: 10000 });
         let items = Array.isArray(resp.data) ? resp.data : [];
 
-        // 4. الفلترة الصارمة (لضمان بقاء المحتوى عربياً فقط)
+        // فلترة النتائج لتبقى عربية فقط حتى في البحث العام
         if (allowedIds.length > 0) {
             items = items.filter(i => allowedIds.includes(String(i.category_id)));
         }
@@ -140,6 +111,7 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
     }
 });
 
+// مسارات Meta و Stream تبقى كما هي لضمان عمل التشغيل
 app.get('/meta/:type/:id.json', async (req, res) => {
     const { type, id } = req.params;
     const p = id.split(':');
@@ -170,5 +142,6 @@ app.get('/stream/:type/:id.json', (req, res) => {
     res.json({ streams: [{ title: "⚡ Watch Now", url: u }] });
 });
 
+app.get('/', (req, res) => res.send(`<h1>Arabic IPTV v28 - Developed by Hussain</h1>`));
 if (process.env.VERCEL) module.exports = app;
 else app.listen(7000);
