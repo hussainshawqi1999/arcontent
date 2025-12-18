@@ -36,11 +36,10 @@ app.get('/', (req, res) => {
     const stremioUrl = `${protocol}://${host}/manifest.json`.replace(/^https?/, 'stremio');
     res.send(`
     <div style="background:#0b0b0b;color:#fff;height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;font-family:sans-serif;text-align:center;padding:20px;">
-        <h1 style="color:#a37dfc;margin-bottom:5px;">Arabic IPTV v31</h1>
-        <p style="color:#888;margin-bottom:25px;">Turbo Search & Arabic Filter Engine</p>
+        <h1 style="color:#a37dfc;margin-bottom:5px;">Arabic Content - By Hussain v31</h1>
+        <p style="color:#888;margin-bottom:25px;">Unstable version</p>
         <div style="background:#1a1a1a;padding:20px;border-radius:12px;border:1px solid #333;width:100%;max-width:350px;">
             <small style="color:#4caf50;">● Search Engine: Ready</small><br>
-            <small style="color:#4caf50;">● Filter Mode: Strict Arabic</small>
             <a href="${stremioUrl}" style="display:block;margin-top:20px;padding:15px;background:#6a0dad;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">🚀 Install on Stremio</a>
         </div>
     </div>`);
@@ -53,7 +52,7 @@ app.get('/manifest.json', async (req, res) => {
         id: "org.arabic.hussain.turbo.v31",
         version: "31.0.0",
         name: "Arabic Content - By Hussain",
-        description: "Turbo Search + Strict Arabic Discovery",
+        description: "Arabic Movies and Series",
         resources: ["catalog", "meta", "stream"],
         types: ["movie", "series"],
         catalogs: [
@@ -97,8 +96,6 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
 
         const resp = await axios.get(apiUrl, { timeout: 9000 });
         let items = Array.isArray(resp.data) ? resp.data : [];
-
-        // الفلترة لضمان بقاء المحتوى عربياً حتى عند فشل السيرفر في التخصيص
         if (allowedIds.length > 0 && !searchTerm) {
             items = items.filter(i => allowedIds.includes(String(i.category_id)));
         }
@@ -120,7 +117,6 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
     }
 });
 
-// مسارات Meta و Stream الأساسية
 app.get('/meta/:type/:id.json', async (req, res) => {
     const { type, id } = req.params;
     if (id === "empty" || id === "error") return res.json({ meta: { id, name: "Status", type } });
