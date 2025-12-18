@@ -30,14 +30,54 @@ async function syncArabicCats() {
     } catch (e) {}
 }
 
+app.get('/', (req, res) => {
+    const host = req.get('host');
+    const protocol = req.protocol;
+    const manifestUrl = `${protocol}://${host}/manifest.json`;
+    const stremioUrl = manifestUrl.replace(/^https?/, 'stremio');
+
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Arabic IPTV - By Hussain</title>
+        <style>
+            body { background-color: #0b0b0b; color: white; font-family: sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+            .container { background: #1a1a1a; padding: 40px; border-radius: 12px; text-align: center; border: 1px solid #333; box-shadow: 0 10px 40px rgba(0,0,0,0.6); max-width: 450px; width: 90%; }
+            h1 { margin-bottom: 10px; color: #a37dfc; font-size: 28px; }
+            p { color: #888; margin-bottom: 30px; line-height: 1.5; }
+            .status-box { background: #252525; padding: 15px; border-radius: 8px; margin-bottom: 25px; border: 1px dashed #444; }
+            .btn { display: block; width: 100%; padding: 16px; margin: 10px 0; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 18px; transition: 0.2s; background: #6a0dad; color: white; border: none; cursor: pointer; box-sizing: border-box; }
+            .btn:hover { background: #7b1fa2; transform: scale(1.02); }
+            .footer { margin-top: 20px; font-size: 12px; color: #555; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Arabic IPTV</h1>
+            <p>بوابتك للمحتوى العربي المفلتر</p>
+            <div class="status-box">
+                <small style="color: #4caf50;">● System Active</small><br>
+                <small>Filtering 12,000+ Series by ${AR_PREFIX}</small>
+            </div>
+            <a href="${stremioUrl}" class="btn">🚀 Install on Stremio</a>
+            <div class="footer">Version 25.0.0 | Developed by Hussain</div>
+        </div>
+    </body>
+    </html>
+    `);
+});
+
 app.get('/manifest.json', async (req, res) => {
     await syncArabicCats();
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json({
-        id: "org.arabic.hussain.debug.v24",
-        version: "24.0.0",
+        id: "org.arabic.hussain.ultimate.v25",
+        version: "25.0.0",
         name: "Arabic Content - By Hussain",
-        description: "Filtered Arabic IPTV (Error Reporting Enabled)",
+        description: "Strict Arabic Filtered IPTV (Search & Genres Fixed)",
         resources: ["catalog", "meta", "stream"],
         types: ["movie", "series"],
         catalogs: [
@@ -73,7 +113,6 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
             if (target) apiUrl += `&category_id=${target.id}`;
         } else if (allowedIds.length > 0) apiUrl += `&category_id=${allowedIds[0]}`;
 
-        // محاولة جلب البيانات بمهلة 8 ثوانٍ (لتجنب انهيار Vercel)
         const resp = await axios.get(apiUrl, { timeout: 8000 });
         let items = Array.isArray(resp.data) ? resp.data : [];
 
@@ -81,7 +120,6 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
             items = items.filter(i => allowedIds.includes(String(i.category_id)));
         }
 
-        // إذا كانت النتائج صفر، نعرض رسالة للمستخدم
         if (items.length === 0) {
             return res.json({ metas: [{ id: "error", name: "❌ No results found", type: type, posterShape: "poster" }] });
         }
@@ -93,29 +131,17 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
 
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.json({ metas });
-
     } catch (e) {
-        // في حال حدوث خطأ (مثل Timeout أو خطأ سيرفر)، نعرض رسالة واضحة
         let errorMsg = "❌ Connection Error";
-        if (e.code === 'ECONNABORTED') errorMsg = "❌ Search Timeout (Server Busy)";
-        
+        if (e.code === 'ECONNABORTED') errorMsg = "❌ Search Timeout";
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.json({ 
-            metas: [{ 
-                id: "error", 
-                name: errorMsg, 
-                description: "Try a more specific search term", 
-                type: type, 
-                posterShape: "poster" 
-            }] 
-        });
+        res.json({ metas: [{ id: "error", name: errorMsg, type: type, posterShape: "poster" }] });
     }
 });
 
-// باقي المسارات (Meta & Stream) تبقى كما هي في v23
 app.get('/meta/:type/:id.json', async (req, res) => {
     const { type, id } = req.params;
-    if (id === "error") return res.json({ meta: { id, name: "Error", type, description: "Please try again." } });
+    if (id === "error") return res.json({ meta: { id, name: "Error", type } });
     const p = id.split(':');
     res.setHeader('Access-Control-Allow-Origin', '*');
     if (type === 'series') {
@@ -129,7 +155,7 @@ app.get('/meta/:type/:id.json', async (req, res) => {
                     });
                 });
             }
-            return res.json({ meta: { id, type: 'series', name: data.info.name, poster: data.info.cover, videos } });
+            return res.json({ meta: { id, type: 'series', name: data.info.name, poster: data.info.cover, description: data.info.plot, videos } });
         } catch (e) {}
     }
     res.json({ meta: { id, type, name: "Watch Now" } });
@@ -144,6 +170,5 @@ app.get('/stream/:type/:id.json', (req, res) => {
     res.json({ streams: [{ title: "⚡ Watch Now", url: u }] });
 });
 
-app.get('/', (req, res) => res.send("<h1>Arabic IPTV v24 - Debug Mode Active</h1>"));
 if (process.env.VERCEL) module.exports = app;
 else app.listen(7000);
