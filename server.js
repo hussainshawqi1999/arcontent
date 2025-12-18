@@ -46,17 +46,17 @@ app.get('/', (req, res) => {
     const host = req.get('host');
     const manifestUrl = `${protocol}://${host}/manifest.json`;
     const stremioUrl = manifestUrl.replace(/^https?/, 'stremio');
-    res.send(`<div style="background:#0b0b0b;color:#fff;height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;font-family:sans-serif;text-align:center;"><h2>Arabic Content - By Hussain</h2><p style="color:#888">Search Logic Restored from Previous Version</p><a href="${stremioUrl}" style="padding:15px 35px;background:#6a0dad;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">🚀 Install to Stremio</a></div>`);
+    res.send(`<div style="background:#0b0b0b;color:#fff;height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;font-family:sans-serif;text-align:center;"><h2>Arabic Content - By Hussain</h2><p style="color:#888">Global Search Enabled | Discover: Arabic Only</p><a href="${stremioUrl}" style="padding:15px 35px;background:#6a0dad;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">🚀 Install to Stremio</a></div>`);
 });
 
 app.get('/manifest.json', async (req, res) => {
     await syncCats();
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json({
-        id: "org.arabic.hussain.search.v16",
-        version: "16.0.0",
+        id: "org.arabic.hussain.global.v17",
+        version: "17.0.0",
         name: "Arabic Content - By Hussain",
-        description: "Arabic IPTV - Movies & Series",
+        description: "Global Search Mode",
         resources: ["catalog", "meta", "stream"],
         types: ["movie", "series"],
         catalogs: [
@@ -86,7 +86,6 @@ async function handleCatalog(req, res) {
     }
 
     const action = type === 'movie' ? 'get_vod_streams' : 'get_series';
-    const catAction = type === 'movie' ? 'get_vod_categories' : 'get_series_categories';
     const allowedCats = type === 'movie' ? CACHE.movieCats : CACHE.seriesCats;
     const allowedIds = allowedCats.map(c => String(c.category_id));
 
@@ -96,14 +95,10 @@ async function handleCatalog(req, res) {
         if (extraObj.search) {
             const searchTerm = encodeURIComponent(extraObj.search);
             const searchUrl = `${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=${action}&search=${searchTerm}`;
-            
             const searchRes = await axios.get(searchUrl, { timeout: 10000 });
+            
             if (Array.isArray(searchRes.data)) {
-                // الفلترة لضمان أن النتائج عربية فقط (الميزة التي طلبتها)
-                metas = searchRes.data.filter(item => 
-                    allowedIds.includes(String(item.category_id)) &&
-                    item.name && item.name.toLowerCase().includes(extraObj.search.toLowerCase())
-                );
+                metas = searchRes.data; 
             }
         } else {
             let categoryId = null;
@@ -118,7 +113,7 @@ async function handleCatalog(req, res) {
             if (categoryId) apiUrl += `&category_id=${categoryId}`;
 
             const response = await axios.get(apiUrl, { timeout: 10000 });
-            metas = Array.isArray(response.data) ? response.data : [];
+            metas = Array.isArray(response.data) ? response.data.filter(item => allowedIds.includes(String(item.category_id))) : [];
         }
 
         metas = sortItems(metas);
@@ -168,7 +163,8 @@ app.get('/stream/:type/:id.json', (req, res) => {
     const p = req.params.id.split(':');
     let u = "";
     if (p[1] === 'movie') u = `${IPTV_CONFIG.host}/movie/${IPTV_CONFIG.user}/${IPTV_CONFIG.pass}/${p[2]}.${p[3]}`;
-    else if (p[1] === 'ep') u = `${IPTV_CONFIG.host}/series/${IPTV_CONFIG.user}/${IPTV_CONFIG.pass}/${p[2]}.${p[3]}`;
+    else if (p[1] === 'ep') u = `${IPTV.host}/series/${IPTV.user}/${IPTV.pass}/${p[2]}.${p[3]}`;
+    else if (p[1] === 'series') u = `${IPTV_CONFIG.host}/series/${IPTV_CONFIG.user}/${IPTV_CONFIG.pass}/${p[2]}`;
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json({ streams: [{ title: "⚡ Watch Now", url: u }] });
 });
