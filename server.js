@@ -5,38 +5,40 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 
-const IPTV = {
-    host: "http://116342296971.d4ktv.info:80",
-    user: "hicham_100081",
-    pass: "E8fk82lZ"
+const IPTV_CONFIG = {
+    host: "http://116342296971.d4ktv.info:80", 
+    user: "hicham_100081",                
+    pass: "E8fk82lZ"                 
 };
 
-if (IPTV.host.endsWith('/')) IPTV.host = IPTV.host.slice(0, -1);
-if (!IPTV.host.startsWith('http')) IPTV.host = 'http://' + IPTV.host;
+if (IPTV_CONFIG.host.endsWith('/')) IPTV_CONFIG.host = IPTV_CONFIG.host.slice(0, -1);
+if (!IPTV_CONFIG.host.startsWith('http')) IPTV_CONFIG.host = 'http://' + IPTV_CONFIG.host;
 
-const AR_PREFIX = "|AR|";
-let CAT_CACHE = { movieIds: new Set(), seriesIds: new Set(), movieGenres: [], seriesGenres: [], lastUpdated: 0 };
+const FILTER_PREFIX = "|AR|"; 
+
+let CACHE = { movieCats: [], seriesCats: [], lastUpdated: 0 };
 
 async function syncCats() {
     const now = Date.now();
-    if (now - CAT_CACHE.lastUpdated < 3600000 && CAT_CACHE.movieIds.size > 0) return;
+    if (now - CACHE.lastUpdated < 3600000 && CACHE.movieCats.length > 0) return;
     try {
         const [v, s] = await Promise.all([
-            axios.get(`${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=get_vod_categories`, { timeout: 5000 }).catch(() => ({ data: [] })),
-            axios.get(`${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=get_series_categories`, { timeout: 5000 }).catch(() => ({ data: [] }))
+            axios.get(`${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=get_vod_categories`, { timeout: 4000 }).catch(e => ({ data: [] })),
+            axios.get(`${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=get_series_categories`, { timeout: 4000 }).catch(e => ({ data: [] }))
         ]);
-        if (Array.isArray(v.data)) {
-            const f = v.data.filter(c => c.category_name.toUpperCase().includes(AR_PREFIX));
-            CAT_CACHE.movieIds = new Set(f.map(c => String(c.category_id)));
-            CAT_CACHE.movieGenres = f.map(c => c.category_name);
-        }
-        if (Array.isArray(s.data)) {
-            const f = s.data.filter(c => c.category_name.toUpperCase().includes(AR_PREFIX));
-            CAT_CACHE.seriesIds = new Set(f.map(c => String(c.category_id)));
-            CAT_CACHE.seriesGenres = f.map(c => c.category_name);
-        }
-        CAT_CACHE.lastUpdated = now;
+        CACHE.movieCats = Array.isArray(v.data) ? v.data.filter(c => c.category_name.toUpperCase().startsWith(FILTER_PREFIX)) : [];
+        CACHE.seriesCats = Array.isArray(s.data) ? s.data.filter(c => c.category_name.toUpperCase().startsWith(FILTER_PREFIX)) : [];
+        CACHE.lastUpdated = now;
     } catch (e) {}
+}
+
+function sortItems(items) {
+    if (!Array.isArray(items)) return [];
+    return items.sort((a, b) => {
+        const idA = Number(a.stream_id || a.series_id || 0);
+        const idB = Number(b.stream_id || b.series_id || 0);
+        return idB - idA; 
+    });
 }
 
 app.get('/', (req, res) => {
@@ -44,90 +46,109 @@ app.get('/', (req, res) => {
     const host = req.get('host');
     const manifestUrl = `${protocol}://${host}/manifest.json`;
     const stremioUrl = manifestUrl.replace(/^https?/, 'stremio');
-    res.send(`<div style="background:#0b0b0b;color:#fff;height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;font-family:sans-serif;text-align:center;"><h2>Arabic Content - By Hussain</h2><p style="color:#888">Final Search Fix (v14)</p><a href="${stremioUrl}" style="padding:15px 35px;background:#6a0dad;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">🚀 Install to Stremio</a></div>`);
+    res.send(`<div style="background:#0b0b0b;color:#fff;height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;font-family:sans-serif;text-align:center;"><h2>Arabic Content - By Hussain</h2><p style="color:#888">Search Logic Restored from Previous Version</p><a href="${stremioUrl}" style="padding:15px 35px;background:#6a0dad;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">🚀 Install to Stremio</a></div>`);
 });
 
 app.get('/manifest.json', async (req, res) => {
     await syncCats();
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json({
-        id: "org.arabic.hussain.finalfix.v14",
-        version: "14.0.0",
+        id: "org.arabic.hussain.search.v16",
+        version: "16.0.0",
         name: "Arabic Content - By Hussain",
-        description: "Full Library Search Enabled (Arabic Only)",
+        description: "Arabic IPTV - Movies & Series",
         resources: ["catalog", "meta", "stream"],
         types: ["movie", "series"],
         catalogs: [
-            { type: "movie", id: "ar-movies", name: "Arabic Movies", extra: [{ name: "genre", options: CAT_CACHE.movieGenres }, { name: "search" }, { name: "skip" }] },
-            { type: "series", id: "ar-series", name: "Arabic Series", extra: [{ name: "genre", options: CAT_CACHE.seriesGenres }, { name: "search" }, { name: "skip" }] }
+            { type: "movie", id: "ar-movies", name: "Arabic Movies", extra: [{ name: "genre", options: CACHE.movieCats.map(c => c.category_name) }, { name: "search" }, { name: "skip" }] },
+            { type: "series", id: "ar-series", name: "Arabic Series", extra: [{ name: "genre", options: CACHE.seriesCats.map(c => c.category_name) }, { name: "search" }, { name: "skip" }] }
         ],
         idPrefixes: ["xtream:"]
     });
 });
 
-app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
+async function handleCatalog(req, res) {
     const { type, extra } = req.params;
     await syncCats();
     
-    let searchTerm = null;
-    let genreName = null;
-    let skipCount = 0;
-
+    let extraObj = {};
     if (extra) {
-        const pairs = extra.split('&');
-        pairs.forEach(p => {
-            const [k, v] = p.split('=');
-            if (k === 'search') searchTerm = decodeURIComponent(v);
-            if (k === 'genre') genreName = decodeURIComponent(v);
-            if (k === 'skip') skipCount = parseInt(v) || 0;
-        });
+        try {
+            if (extra.includes('=')) {
+                const params = new URLSearchParams(extra);
+                extraObj.genre = params.get('genre');
+                extraObj.search = params.get('search');
+                extraObj.skip = parseInt(params.get('skip')) || 0;
+            } else {
+                extraObj.search = extra; 
+            }
+        } catch(e) {}
     }
 
     const action = type === 'movie' ? 'get_vod_streams' : 'get_series';
-    const allowedIds = type === 'movie' ? CAT_CACHE.movieIds : CAT_CACHE.seriesIds;
+    const catAction = type === 'movie' ? 'get_vod_categories' : 'get_series_categories';
+    const allowedCats = type === 'movie' ? CACHE.movieCats : CACHE.seriesCats;
+    const allowedIds = allowedCats.map(c => String(c.category_id));
 
     try {
-        let apiUrl = `${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=${action}`;
-        
-        if (searchTerm) {
-            apiUrl += `&search=${encodeURIComponent(searchTerm)}`;
-        } else if (genreName) {
-            const catAction = type === 'movie' ? 'get_vod_categories' : 'get_series_categories';
-            const catRes = await axios.get(`${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=${catAction}`, { timeout: 4000 });
-            const c = catRes.data.find(cat => cat.category_name === genreName);
-            if (c) apiUrl += `&category_id=${c.category_id}`;
+        let metas = [];
+
+        if (extraObj.search) {
+            const searchTerm = encodeURIComponent(extraObj.search);
+            const searchUrl = `${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=${action}&search=${searchTerm}`;
+            
+            const searchRes = await axios.get(searchUrl, { timeout: 10000 });
+            if (Array.isArray(searchRes.data)) {
+                // الفلترة لضمان أن النتائج عربية فقط (الميزة التي طلبتها)
+                metas = searchRes.data.filter(item => 
+                    allowedIds.includes(String(item.category_id)) &&
+                    item.name && item.name.toLowerCase().includes(extraObj.search.toLowerCase())
+                );
+            }
         } else {
-            const firstId = Array.from(allowedIds)[0];
-            if (firstId) apiUrl += `&category_id=${firstId}`;
+            let categoryId = null;
+            if (extraObj.genre) {
+                const target = allowedCats.find(c => c.category_name === extraObj.genre);
+                if (target) categoryId = target.category_id;
+            } else if (allowedIds.length > 0) {
+                categoryId = allowedIds[0];
+            }
+
+            let apiUrl = `${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=${action}`;
+            if (categoryId) apiUrl += `&category_id=${categoryId}`;
+
+            const response = await axios.get(apiUrl, { timeout: 10000 });
+            metas = Array.isArray(response.data) ? response.data : [];
         }
 
-        const resp = await axios.get(apiUrl, { timeout: 10000 });
-        let items = Array.isArray(resp.data) ? resp.data : [];
-
-        if (searchTerm || !genreName) {
-            items = items.filter(i => allowedIds.has(String(i.category_id)));
-        }
-
-        const metas = items.slice(skipCount, skipCount + 100).map(i => ({
+        metas = sortItems(metas);
+        const finalMetas = metas.slice(extraObj.skip || 0, (extraObj.skip || 0) + 100).map(i => ({
             id: type === 'series' ? `xtream:series:${i.series_id}` : `xtream:movie:${i.stream_id}:${i.container_extension}`,
-            type: type, name: i.name, poster: i.stream_icon || i.cover, posterShape: 'poster'
+            type: type,
+            name: i.name,
+            poster: i.stream_icon || i.cover,
+            posterShape: 'poster'
         }));
 
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.json({ metas });
+        res.json({ metas: finalMetas });
+
     } catch (e) {
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.json({ metas: [] });
     }
-});
+}
+
+app.get('/catalog/:type/:id/:extra?.json', handleCatalog);
+app.get('/catalog/:type/:id.json', handleCatalog);
 
 app.get('/meta/:type/:id.json', async (req, res) => {
     const { type, id } = req.params;
     const p = id.split(':');
     res.setHeader('Access-Control-Allow-Origin', '*');
-    if (type === 'series') {
+    if (type === 'series' && id.startsWith('xtream:series:')) {
         try {
-            const { data } = await axios.get(`${IPTV.host}/player_api.php?username=${IPTV.user}&password=${IPTV.pass}&action=get_series_info&series_id=${p[2]}`, { timeout: 9000 });
+            const { data } = await axios.get(`${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=get_series_info&series_id=${p[2]}`, { timeout: 9000 });
             let v = [];
             if (data.episodes) {
                 Object.values(data.episodes).forEach(s => {
@@ -146,13 +167,11 @@ app.get('/meta/:type/:id.json', async (req, res) => {
 app.get('/stream/:type/:id.json', (req, res) => {
     const p = req.params.id.split(':');
     let u = "";
-    if (p[1] === 'movie') u = `${IPTV.host}/movie/${IPTV.user}/${IPTV.pass}/${p[2]}.${p[3]}`;
-    else if (p[1] === 'ep') u = `${IPTV.host}/series/${IPTV.user}/${IPTV.pass}/${p[2]}.${p[3]}`;
+    if (p[1] === 'movie') u = `${IPTV_CONFIG.host}/movie/${IPTV_CONFIG.user}/${IPTV_CONFIG.pass}/${p[2]}.${p[3]}`;
+    else if (p[1] === 'ep') u = `${IPTV_CONFIG.host}/series/${IPTV_CONFIG.user}/${IPTV_CONFIG.pass}/${p[2]}.${p[3]}`;
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json({ streams: [{ title: "⚡ Watch Now", url: u }] });
 });
-
-app.get('/catalog/:type/:id.json', (req, res) => res.redirect(`/catalog/${req.params.type}/${req.params.id}/skip=0.json`));
 
 if (process.env.VERCEL) module.exports = app;
 else app.listen(7000);
