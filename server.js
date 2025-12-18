@@ -16,34 +16,30 @@ if (!IPTV_CONFIG.host.startsWith('http')) IPTV_CONFIG.host = 'http://' + IPTV_CO
 
 const FILTER_PREFIX = "|AR|"; 
 
-let ALLOWED_CATS = {
-    movie: [],
-    series: [],
+let CACHED_DATA = {
+    movieCats: [],
+    seriesCats: [],
     lastUpdated: 0
 };
 
-async function updateAllowedCats() {
+async function updateCategories() {
     const now = Date.now();
-    if (now - ALLOWED_CATS.lastUpdated < 3600000 && ALLOWED_CATS.movie.length > 0) return;
+    if (now - CACHED_DATA.lastUpdated < 3600000 && CACHED_DATA.movieCats.length > 0) return;
 
     try {
         const [vodRes, serRes] = await Promise.all([
-            axios.get(`${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=get_vod_categories`, { timeout: 5000 }).catch(e => ({ data: [] })),
-            axios.get(`${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=get_series_categories`, { timeout: 5000 }).catch(e => ({ data: [] }))
+            axios.get(`${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=get_vod_categories`, { timeout: 4000 }).catch(e => ({ data: [] })),
+            axios.get(`${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=get_series_categories`, { timeout: 4000 }).catch(e => ({ data: [] }))
         ]);
 
         if (Array.isArray(vodRes.data)) {
-            ALLOWED_CATS.movie = vodRes.data
-                .filter(c => c.category_name.toUpperCase().includes(FILTER_PREFIX) || c.category_name.toUpperCase().includes("ARABIC"))
-                .map(c => c.category_id);
+            CACHED_DATA.movieCats = vodRes.data.filter(c => c.category_name.toUpperCase().includes(FILTER_PREFIX) || c.category_name.includes("ARABIC"));
         }
         
         if (Array.isArray(serRes.data)) {
-            ALLOWED_CATS.series = serRes.data
-                .filter(c => c.category_name.toUpperCase().includes(FILTER_PREFIX) || c.category_name.toUpperCase().includes("ARABIC"))
-                .map(c => c.category_id);
+            CACHED_DATA.seriesCats = serRes.data.filter(c => c.category_name.toUpperCase().includes(FILTER_PREFIX) || c.category_name.includes("ARABIC"));
         }
-        ALLOWED_CATS.lastUpdated = now;
+        CACHED_DATA.lastUpdated = now;
     } catch (e) { }
 }
 
@@ -79,7 +75,7 @@ app.get('/', (req, res) => {
     <body>
         <div class="container">
             <h1>Arabic Content - By Hussain</h1>
-            <p>Flexible Search & Filter</p>
+            <p>Ready with Genres</p>
             <a href="${stremioUrl}" class="btn">🚀 Install Addon</a>
         </div>
     </body>
@@ -88,11 +84,17 @@ app.get('/', (req, res) => {
 });
 
 app.get('/manifest.json', async (req, res) => {
-    updateAllowedCats().catch(e => {});
+    await updateCategories();
+
+    const movieGenres = CACHED_DATA.movieCats.map(c => c.category_name);
+    const seriesGenres = CACHED_DATA.seriesCats.map(c => c.category_name);
+
+    if (movieGenres.length > 0) movieGenres.unshift("All");
+    if (seriesGenres.length > 0) seriesGenres.unshift("All");
 
     const manifest = {
-        id: "org.arabic.iptv.hussain.flex",
-        version: "7.2.0",
+        id: "org.arabic.iptv.hussain.genres",
+        version: "8.0.0",
         name: "Arabic Content - By Hussain",
         description: "Arabic Movies and Series",
         resources: ["catalog", "meta", "stream"],
@@ -102,13 +104,13 @@ app.get('/manifest.json', async (req, res) => {
                 type: "movie", 
                 id: "iptv-arabic-movies", 
                 name: "Arabic Movies", 
-                extra: [{ name: "search" }, { name: "skip" }] 
+                extra: [{ name: "genre", options: movieGenres }, { name: "search" }, { name: "skip" }] 
             },
             { 
                 type: "series", 
                 id: "iptv-arabic-series", 
                 name: "Arabic Series", 
-                extra: [{ name: "search" }, { name: "skip" }] 
+                extra: [{ name: "genre", options: seriesGenres }, { name: "search" }, { name: "skip" }] 
             }
         ],
         idPrefixes: ["xtream:"]
@@ -120,30 +122,39 @@ app.get('/manifest.json', async (req, res) => {
 app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
     const { type, extra } = req.params;
     
-    await updateAllowedCats();
+    await updateCategories();
 
     let extraObj = {};
     if (extra) {
         try {
             const params = new URLSearchParams(extra);
+            extraObj.genre = params.get('genre');
             extraObj.search = params.get('search');
             extraObj.skip = parseInt(params.get('skip')) || 0;
         } catch(e) { extraObj.search = extra; }
     }
 
     let action = type === 'movie' ? 'get_vod_streams' : 'get_series';
-    let allowedIds = type === 'movie' ? ALLOWED_CATS.movie : ALLOWED_CATS.series;
+    let cachedCats = type === 'movie' ? CACHED_DATA.movieCats : CACHED_DATA.seriesCats;
+    let allowedIds = cachedCats.map(c => c.category_id);
 
     try {
         let apiUrl = `${IPTV_CONFIG.host}/player_api.php?username=${IPTV_CONFIG.user}&password=${IPTV_CONFIG.pass}&action=${action}`;
         
+        let targetCatId = null;
+
         if (extraObj.search) {
             apiUrl += `&search=${encodeURIComponent(extraObj.search)}`;
-        } else {
-            if (allowedIds.length > 0) {
-                apiUrl += `&category_id=${allowedIds[0]}`; 
-            }
+        } 
+        else if (extraObj.genre && extraObj.genre !== "All") {
+            const cat = cachedCats.find(c => c.category_name === extraObj.genre);
+            if (cat) targetCatId = cat.category_id;
+        } 
+        else {
+            if (allowedIds.length > 0) targetCatId = allowedIds[0];
         }
+
+        if (targetCatId) apiUrl += `&category_id=${targetCatId}`;
 
         const resp = await axios.get(apiUrl, { timeout: 10000 });
         let items = Array.isArray(resp.data) ? resp.data : [];
