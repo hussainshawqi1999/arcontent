@@ -14,7 +14,6 @@ const IPTV = {
 if (IPTV.host.endsWith('/')) IPTV.host = IPTV.host.slice(0, -1);
 const AR_PREFIX = "|AR|";
 
-// كاش بسيط للفئات لتقليل الضغط
 let CACHED_AR_IDS = { movie: [], series: [], lastUpdated: 0 };
 
 async function getArabicIds() {
@@ -31,12 +30,45 @@ async function getArabicIds() {
     } catch (e) {}
 }
 
+app.get('/', (req, res) => {
+    const host = req.get('host');
+    const protocol = req.protocol;
+    const manifestUrl = `${protocol}://${host}/manifest.json`;
+    const stremioUrl = manifestUrl.replace(/^https?/, 'stremio');
+
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Arabic Content - By Hussain</title>
+        <style>
+            body { background-color: #0b0b0b; color: white; font-family: sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+            .container { background: #1a1a1a; padding: 40px; border-radius: 12px; text-align: center; border: 1px solid #333; box-shadow: 0 10px 40px rgba(0,0,0,0.6); max-width: 400px; width: 90%; }
+            h1 { margin-bottom: 10px; color: #a37dfc; }
+            p { color: #888; margin-bottom: 30px; }
+            .btn { display: block; width: 100%; padding: 16px; margin: 10px 0; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 18px; transition: 0.2s; background: #6a0dad; color: white; border: none; cursor: pointer; }
+            .btn:hover { background: #7b1fa2; transform: scale(1.02); }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Arabic Content</h1>
+            <p>Filtered IPTV by Hussain</p>
+            <a href="${stremioUrl}" class="btn">🚀 Install Addon</a>
+        </div>
+    </body>
+    </html>
+    `);
+});
+
 app.get('/manifest.json', async (req, res) => {
     await getArabicIds();
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json({
-        id: "org.arabic.hussain.v21",
-        version: "21.0.0",
+        id: "org.arabic.hussain.v22",
+        version: "22.0.0",
         name: "Arabic Content - By Hussain",
         description: "IPTV Arabic Only - Search Fixed",
         resources: ["catalog", "meta", "stream"],
@@ -55,7 +87,6 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
 
     let searchTerm = "";
     if (extra) {
-        // استخراج كلمة البحث بدقة وحذف .json
         const match = extra.match(/search=([^&]+)/);
         searchTerm = match ? decodeURIComponent(match[1]).replace('.json', '') : "";
     }
@@ -69,14 +100,12 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
         if (searchTerm) {
             apiUrl += `&search=${encodeURIComponent(searchTerm)}`;
         } else {
-            // إذا لم يكن بحثاً، نجلب أول فئة عربية فقط لتجنب جلب 12 ألف عنصر
             if (allowedIds.length > 0) apiUrl += `&category_id=${allowedIds[0]}`;
         }
 
         const resp = await axios.get(apiUrl, { timeout: 9000 });
         let items = Array.isArray(resp.data) ? resp.data : [];
 
-        // فلترة النتائج لتكون عربية فقط
         if (allowedIds.length > 0) {
             items = items.filter(i => allowedIds.includes(String(i.category_id)));
         }
@@ -126,6 +155,5 @@ app.get('/stream/:type/:id.json', (req, res) => {
     res.json({ streams: [{ title: "⚡ Watch Now", url: u }] });
 });
 
-app.get('/', (req, res) => res.send("Arabic IPTV Addon Active"));
 if (process.env.VERCEL) module.exports = app;
 else app.listen(7000);
